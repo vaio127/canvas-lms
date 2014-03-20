@@ -124,7 +124,7 @@
           <% cache([@context.wiki, 'non_deleted_wiki_pages']) do  %>
             <% @context.wiki.wiki_pages.not_deleted.select([:id, :title]).each do |page| %>
               <% if page && !page.new_record? %>
-                <option value="<%= page.id %>"><%= page.title %></option>
+                <option value="<%= page.id %>" title="<%= page.title %>"><%= page.title %></option>
               <% end %>
             <% end %>
           <% end %>
@@ -150,7 +150,7 @@
           <% Canvas::ICU.collate_by(@context.folders.active.limit(200).includes(includes), &:full_name).each do |folder| %>
             <optgroup label="<%= folder.full_name %>">
               <% Canvas::ICU.collate_by(folder.send(includes), &:display_name).each do |file| %>
-                <option value="<%= file.id %>"><%= file.display_name %></option>
+                <option value="<%= file.id %>" title="<%= file.display_name %>"><%= file.display_name %></option>
               <% end %>
             </optgroup>
           <% end %>
@@ -188,7 +188,7 @@
         <div style="margin-top: 5px;">
         <select class="module_item_select" multiple>
           <% @context.quizzes.active.limit(400).each do |quiz| %>
-            <option value="<%= quiz.id %>"><%= quiz.title %></option>
+            <option value="<%= quiz.id %>" title="<%= quiz.title %>"><%= quiz.title %></option>
           <% end %>
           <% if @context.grants_right?(@current_user, session, :manage_assignments) %>
             <option value="new"><%= t :new_quiz_option, "[ New Quiz ]" %></option>
@@ -232,7 +232,7 @@
           <% @context.assignment_groups.active.include_active_assignments.each do |group| %>
             <optgroup label="<%= group.name %>">
             <% group.active_assignments.no_graded_quizzes_or_topics.limit(200).each do |assignment| %>
-              <option value="<%= assignment.id %>"><%= assignment.title %></option>
+              <option value="<%= assignment.id %>" title="<%= assignment.title %>"><%= assignment.title %></option>
             <% end %>
             </optgroup>
           <% end %>
@@ -257,7 +257,7 @@
         <div style="margin-top: 5px;">
         <select class="module_item_select" multiple>
           <% @context.discussion_topics.active.only_discussion_topics.scoped({:limit => 200}).each do |topic| %>
-            <option value="<%= topic.id %>"><%= topic.title %></option>
+            <option value="<%= topic.id %>" title="<%= topic.title %>"><%= topic.title %></option>
           <% end %>
           <option value="new"><%= t :new_topic_option, "[ New Topic ]" %></option>
         </select>
