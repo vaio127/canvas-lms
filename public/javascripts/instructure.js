@@ -32,7 +32,7 @@ define([
   'jquery.doc_previews' /* filePreviewsEnabled, loadDocPreview */,
   'jquery.dropdownList' /* dropdownList */,
   'jquery.google-analytics' /* trackEvent */,
-  'jquery.instructure_date_and_time' /* parseFromISO, dateString */,
+  'jquery.instructure_date_and_time' /* datetimeString, dateString, fudgeDateForProfileTimezone */,
   'jquery.instructure_forms' /* formSubmit, fillFormData, formErrors */,
   'jqueryui/dialog',
   'jquery.instructure_misc_helpers' /* replaceTags, youTubeID */,
@@ -451,9 +451,9 @@ define([
 
     $(".zone_cached_datetime").each(function() {
       if($(this).attr('title')) {
-        var dt = $.parseFromISO($(this).attr('title'));
-        if(dt.timestamp) {
-          $(this).text(dt.datetime_formatted);
+        var datetime = tz.parse($(this).attr('title'));
+        if (datetime) {
+          $(this).text($.datetimeString(datetime));
         }
       }
     });
@@ -561,7 +561,7 @@ define([
         message_data = data.messages[0];
         $message.fillTemplateData({
           data: {
-            post_date: $.parseFromISO(message_data.created_at).datetime_formatted,
+            post_date: $.datetimeString(message_data.created_at),
             message: message_data.body
           },
           htmlValues: ['message']
@@ -606,7 +606,7 @@ define([
           }
           if(submission) {
             var comment = submission.submission_comments[submission.submission_comments.length - 1].submission_comment;
-            comment.post_date = $.parseFromISO(comment.created_at).datetime_formatted;
+            comment.post_date = $.datetimeString(comment.created_at);
             comment.message = comment.formatted_body || comment.comment;
             $message.fillTemplateData({
               data: comment,
@@ -615,7 +615,7 @@ define([
           }
         } else {
           var entry = data.discussion_entry;
-          entry.post_date = $.parseFromISO(entry.created_at).datetime_formatted;
+          entry.post_date = $.datetimeString(entry.created_at);
           $message.find(".content > .message_html").val(entry.message);
           $message.fillTemplateData({
             data: entry,
@@ -713,7 +713,7 @@ define([
             var topic = data.discussion_topic;
             topic.context_code = context_name;
             topic.user_name = $("#identity .user_name").text();
-            topic.post_date = $.parseFromISO(topic.created_at).datetime_formatted;
+            topic.post_date = $.datetimeString(topic.created_at);
             topic.topic_id = topic.id;
             var $template = $(this).parents(".communication_message").find(".template");
             var $message = $template.find(".communication_message").clone(true);
@@ -759,8 +759,7 @@ define([
     // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
     // vvvvvvvvvvvvvvvvv BEGIN stuf form making pretty dates vvvvvvvvvvvvvvvvvv
     // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-    var timeZoneOffset = tz.currentOffset() / -60,
-        timeAgoEvents  = [];
+    var timeAgoEvents  = [];
     function timeAgoRefresh() {
       timeAgoEvents = $(".time_ago_date:visible").toArray();
       processNextTimeAgoEvent();
@@ -769,31 +768,13 @@ define([
       var eventElement = timeAgoEvents.shift();
       if (eventElement) {
         var $event = $(eventElement),
-            originalDate = $event.data('original_date') || "",
-            date = $event.data('parsed_date') || ( originalDate ?
-                      Date.parse(originalDate.replace(/ (at|by)/, "")) :
-                      Date.parse(($event.text() || "").replace(/ (at|by)/, "")) );
+            date = $event.data('parsed_date') || Date.parse($event.data('timestamp') || "");
         if (date) {
-          var now = new Date();
-          now.setDate(now.getDate() + 1);
-          if (!originalDate && date > now && date - now > 3600000) {
-            var year = date.getUTCFullYear().toString();
-            if(date > now && date.getUTCFullYear() == now.getUTCFullYear() && !$event.text().match(year)) {
-              date.setUTCFullYear(date.getUTCFullYear() - 1);
-            }
-          }
-          var timeZoneDiff = now.getTimezoneOffset() - timeZoneOffset;
-          if(isNaN(timeZoneDiff)) { timeZoneDiff = 0; }
-          var diff = now - date + (timeZoneDiff * 60 * 1000);
-          $event.data('original_date', date.toString("MMM d, yyyy h:mmtt"));
+          var diff = new Date() - date;
+          $event.data('timestamp', date.toISOString());
           $event.data('parsed_date', date);
-          // This line would compensate for a user who set their time zone to something
-          //   different than the time zone setting on the current computer.  It would adjust
-          //   the times displayed to match the time zone of the current computer.  This could
-          //   be confusing for a student since due dates and things will NOT be adjusted,
-          //   so dates and times will not match up.
-          // date = date.addMinutes(-1 * timeZoneDiff);
-          var defaultDateString = date.toString("MMM d, yyyy") + date.toString(" h:mmtt").toLowerCase();
+          var fudgedDate = $.fudgeDateForProfileTimezone(date);
+          var defaultDateString = fudgedDate.toString("MMM d, yyyy") + fudgedDate.toString(" h:mmtt").toLowerCase();
           var dateString = defaultDateString;
           if(diff < (24 * 3600 * 1000)) {
             if(diff < (3600 * 1000)) {
@@ -861,6 +842,16 @@ define([
           $(window).resize(); //this will be helpful for things like $.fn.fillWindowWithMe so that it knows the dimensions of the page have changed.
         }
       });
+    } else {
+      var draft_state_msf = $('#sequence_footer.draft_state_enabled')
+      if (draft_state_msf.length) {
+        var el = $(draft_state_msf[0]);
+        el.moduleSequenceFooter({
+          courseID: el.attr("data-course-id"),
+          assetType: el.attr("data-asset-type"),
+          assetID: el.attr("data-asset-id")
+        });
+      }
     }
 
     var $wizard_box = $("#wizard_box");

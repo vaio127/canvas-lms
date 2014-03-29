@@ -25,13 +25,25 @@ if CANVAS_RAILS2
   end
 end
 
-unless CANVAS_RAILS2
+unless CANVAS_RAILS2 || ENV['NO_RERUN']
   require 'timeout'
   RSpec.configure do |c|
     c.around(:each) do |example|
-      Timeout::timeout(300) {
-        example.run
-      }
+      attempts = 0
+      begin
+        Timeout::timeout(180) {
+          example.run
+        }
+        e = @example.instance_variable_get('@exception')
+        if !e.nil? && (attempts += 1) < 2
+          puts "FAILURE: #{@example.description} \n #{e}".red
+          puts "RETRYING: #{@example.description}".yellow
+          @example.instance_variable_set('@exception', nil)
+          redo
+        elsif e.nil? && attempts != 0
+          puts "SUCCESS: retry passed for \n #{@example.description}".green
+        end
+      end until true
     end
   end
 end
@@ -173,11 +185,21 @@ else
     end
   end
 end
-require 'mocha/api'
 require 'action_controller_test_process'
 require File.expand_path(File.dirname(__FILE__) + '/mocha_rspec_adapter')
 require File.expand_path(File.dirname(__FILE__) + '/mocha_extensions')
 require File.expand_path(File.dirname(__FILE__) + '/ams_spec_helper')
+
+# if mocha was initialized before rails (say by another spec), CollectionProxy would have
+# undef_method'd them; we need to restore them
+unless CANVAS_RAILS2
+  Mocha::ObjectMethods.instance_methods.each do |m|
+    ActiveRecord::Associations::CollectionProxy.class_eval <<-RUBY
+      def #{m}; end
+      remove_method #{m.inspect}
+    RUBY
+  end
+end
 
 Dir.glob("#{File.dirname(__FILE__).gsub(/\\/, "/")}/factories/*.rb").each { |file| require file }
 
@@ -240,7 +262,8 @@ def truncate_all_tables
       table_names = connection.tables & models.map(&:table_name)
       connection.execute("TRUNCATE TABLE #{table_names.map { |t| connection.quote_table_name(t) }.join(',')}")
     else
-      models.each { |model| truncate_table(model) }
+      table_names = connection.tables
+      models.each { |model| truncate_table(model) if table_names.include?(model.table_name) }
     end
   end
 end
@@ -877,7 +900,7 @@ end
         :criteria => {
             "0" => {
                 :points => 3,
-                :mastery_points => 0,
+                :mastery_points => opts[:mastery_points] || 0,
                 :description => "Outcome row",
                 :long_description => @outcome.description,
                 :ratings => {
@@ -1039,7 +1062,30 @@ end
   end
 
   def enable_cache(new_cache=:memory_store)
-    Rails.force_cache(new_cache) { yield }
+    new_cache ||= :null_store
+    if CANVAS_RAILS2 && new_cache == :null_store
+      require 'nil_store'
+      new_cache = NilStore.new
+    end
+    new_cache = ActiveSupport::Cache.lookup_store(new_cache)
+    previous_cache = Rails.cache
+    Rails.stubs(:cache).returns(new_cache)
+    ActionController::Base.stubs(:cache_store).returns(new_cache)
+    ActionController::Base.any_instance.stubs(:cache_store).returns(new_cache)
+    previous_perform_caching = ActionController::Base.perform_caching
+    ActionController::Base.stubs(:perform_caching).returns(true)
+    ActionController::Base.any_instance.stubs(:perform_caching).returns(true)
+    if block_given?
+      begin
+        yield
+      ensure
+        Rails.stubs(:cache).returns(previous_cache)
+        ActionController::Base.stubs(:cache_store).returns(previous_cache)
+        ActionController::Base.any_instance.stubs(:cache_store).returns(previous_cache)
+        ActionController::Base.stubs(:perform_caching).returns(previous_perform_caching)
+        ActionController::Base.any_instance.stubs(:perform_caching).returns(previous_perform_caching)
+      end
+    end
   end
 
   # enforce forgery protection, so we can verify usage of the authenticity token
@@ -1211,6 +1257,15 @@ end
   def send_multipart(url, post_params = {}, http_headers = {}, method = :post)
     mp = Multipart::Post.new
     query, headers = mp.prepare_query(post_params)
+
+    # A bug in the testing adapter in Rails 3-2-stable doesn't corretly handle
+    # translating this header to the Rack/CGI compatible version:
+    # (https://github.com/rails/rails/blob/3-2-stable/actionpack/lib/action_dispatch/testing/integration.rb#L289)
+    #
+    # This issue is fixed in Rails 4-0 stable, by using a newer version of
+    # ActionDispatch Http::Headers which correctly handles the merge
+    headers = headers.dup.tap { |h| h['CONTENT_TYPE'] ||= h.delete('Content-type') }
+
     send(method, url, query, headers.merge(http_headers))
   end
 
@@ -1376,6 +1431,17 @@ end
     @page_view.save!
     @page_view
   end
+end
+
+class String
+  def red; colorize(self, "\e[1m\e[31m"); end
+  def green; colorize(self, "\e[1m\e[32m"); end
+  def dark_green; colorize(self, "\e[32m"); end
+  def yellow; colorize(self, "\e[1m\e[33m"); end
+  def blue; colorize(self, "\e[1m\e[34m"); end
+  def dark_blue; colorize(self, "\e[34m"); end
+  def pur; colorize(self, "\e[1m\e[35m"); end
+  def colorize(text, color_code)  "#{color_code}#{text}\e[0m" end
 end
 
 Dir[Rails.root+'vendor/plugins/*/spec_canvas/spec_helper.rb'].each do |f|

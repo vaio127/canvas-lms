@@ -42,7 +42,23 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
   after_save :save_assignment_submission
   before_create :assign_validation_token
 
-  has_many :attachments, :as => :context, :dependent => :destroy
+  has_many :attachments, :as => :context, :dependent => :destroy do
+    if CANVAS_RAILS2
+      def construct_sql
+        @finder_sql = @counter_sql =
+          "#{@reflection.quoted_table_name}.#{@reflection.options[:as]}_id = #{owner_quoted_id} AND " +
+        "#{@reflection.quoted_table_name}.#{@reflection.options[:as]}_type IN ('QuizSubmission', #{@owner.class.quote_value(@owner.class.base_class.name.to_s)})"
+      end
+    else
+      def where(*args)
+        if args.length == 1 && args.first.is_a?(Arel::Nodes::Equality) && args.first.left.name == 'context_type'
+          super(args.first.left.in(['QuizSubmission', 'Quizzes::QuizSubmission']))
+        else
+          super
+        end
+      end
+    end
+  end
 
   # update the QuizSubmission's Submission to 'graded' when the QuizSubmission is marked as 'complete.' this
   # ensures that quiz submissions with essay questions don't show as graded in the SpeedGrader until the instructor
@@ -274,7 +290,7 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
   def needs_grading?(strict=false)
     if strict && self.untaken? && self.overdue?(true)
       true
-    elsif self.untaken? && self.end_at && self.end_at < Time.now && !self.extendable?
+    elsif self.untaken? && self.end_at && self.end_at < Time.now
       true
     elsif self.completed? && self.submission_data && self.submission_data.is_a?(Hash)
       true
@@ -628,7 +644,7 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
     version_data["fudge_points"] = self.fudge_points if attrs.include?(:fudge_points)
     version_data["workflow_state"] = self.workflow_state if attrs.include?(:workflow_state)
     version_data["manually_scored"] = self.manually_scored if attrs.include?(:manually_scored)
-    TextHelper.recursively_strip_invalid_utf8!(version_data, true)
+    Utf8Cleaner.recursively_strip_invalid_utf8!(version_data, true)
     version.yaml = version_data.to_yaml
     res = version.save
     res
@@ -823,6 +839,9 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
   #
   # @throw ArgumentError If the submission does not have an end_at timestamp set.
   def grade_when_overdue
+    # disable grading in background until we figure out potential race condition issues
+    return
+
     unless self.end_at.present?
       raise ArgumentError,
         'QuizSubmission is not applicable for overdue enforced grading!'
@@ -839,6 +858,9 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
 
   # don't use this directly, see #grade_when_overdue
   def grade_if_untaken
+    # disable grading in background until we figure out potential race condition issues
+    return
+
     # We can skip the needs_grading? test because we know that the submission
     # is overdue since the job will be processed after submission.end_at ...
     # so we simply test its workflow state.

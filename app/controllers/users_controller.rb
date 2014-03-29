@@ -48,6 +48,7 @@
 #         },
 #         "short_name": {
 #           "description": "A short name the user has selected, for use in conversations or other less formal places through the site.",
+#           "example": "Shelly",
 #           "type": "string"
 #         },
 #         "sis_user_id": {
@@ -299,6 +300,9 @@ class UsersController < ApplicationController
   end
 
   def user_dashboard
+    if custom_dash = @domain_root_account.settings[:dashboard_url]
+      return redirect_to custom_dash
+    end
     check_incomplete_registration
     get_context
 
@@ -801,8 +805,11 @@ class UsersController < ApplicationController
     @opaque_id = @tool.opaque_identifier_for(@current_user)
     @resource_type = 'user_navigation'
     @return_url = user_profile_url(@current_user, :include_host => true)
-    @launch = BasicLTI::ToolLaunch.new(:url => @resource_url, :tool => @tool, :user => @current_user, :context => @domain_root_account, :link_code => @opaque_id, :return_url => @return_url, :resource_type => @resource_type)
-    @tool_settings = @launch.generate
+
+    adapter = Lti::LtiOutboundAdapter.new(@tool, @current_user, @domain_root_account)
+    adapter.prepare_tool_launch(@return_url, resource_type: @resource_type, link_code: @opaque_id)
+    @tool_settings = adapter.generate_post_payload
+
     @active_tab = @tool.asset_string
     add_crumb(@current_user.short_name, user_profile_path(@current_user))
     render :template => 'external_tools/tool_show'

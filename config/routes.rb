@@ -809,6 +809,10 @@ routes.draw do
   #   resources :collection_items, :only => [:show, :index]
   # end
 
+  scope(:controller => :outcome_results) do
+    get 'courses/:course_id/outcome_rollups', :action => :rollups, :path_name => 'course_outcome_rollups'
+  end
+
   ### API routes ###
 
   # TODO: api routes can't yet take advantage of concerns for DRYness, because of
@@ -1052,6 +1056,13 @@ routes.draw do
 
       put 'users/:id/merge_into/:destination_user_id', controller: 'users', action: 'merge_into'
       put 'users/:id/merge_into/accounts/:destination_account_id/users/:destination_user_id', controller: 'users', action: 'merge_into'
+    end
+
+    scope(:controller => :custom_data) do
+      glob = CANVAS_RAILS2 ? '/*scope' : '(/*scope)'
+      get "users/:user_id/custom_data#{glob}", action: 'get_data'
+      put "users/:user_id/custom_data#{glob}", action: 'set_data'
+      delete "users/:user_id/custom_data#{glob}", action: 'delete_data'
     end
 
     scope(:controller => :pseudonyms) do
